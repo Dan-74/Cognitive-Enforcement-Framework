@@ -15,8 +15,8 @@ abstract: >
 version: 1.0.0
 date-released: 2025-10-29
 license: CC-BY-NC-ND-4.0
-repository-code: https://github.com/dan-74/toolagent-public
-url: https://doi.org/10.5281/zenodo.xxxxxxx
+repository-code: https://github.com/dan-74/Cognitive-Enforcement-Framework
+url: https://doi.org/10.5281/zenodo.17476141
 doi: 10.5281/zenodo.xxxxxxx
 keywords:
   - cognitive integrity
