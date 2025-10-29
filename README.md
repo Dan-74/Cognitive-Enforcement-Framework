@@ -1,4 +1,6 @@
-# ToolAgent – Cognitive Enforcement Framework
+# Cognitive Enforcement Framework  
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17476141.svg)](https://doi.org/10.5281/zenodo.17476141)
+
 
 **Public release version** of the *ToolAgent* project, developed for cognitive auditing and control of automated systems based on agent-driven toolchains.  
 This repository includes only documentation, policies, semantic rules, and reference API specifications.  
@@ -55,14 +57,12 @@ class ToolProtocol(Protocol):
 
     async def run(self, *, input: ToolInput) -> ToolResult: ...
 
-Citation
+## Citation
 
 If you use or reference this work, please cite:
 
-Luzzo, D. (2025). ToolAgent – Cognitive Enforcement Framework (v1.0.0). Zenodo.
-DOI: 10.5281/zenodo.xxxxxxx
-
-This project is recognized as a citable scientific software artifact under academic and institutional standards.
+Luzzo, D. (2025). Cognitive Enforcement Framework (v1.0.0). Zenodo.  
+DOI: 10.5281/zenodo.17476141
 
 License
 
