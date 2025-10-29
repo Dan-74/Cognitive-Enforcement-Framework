@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: ToolAgent – Cognitive Enforcement Framework
+message: "Please cite this work if you use or reference it."
+type: software
+authors:
+  - family-names: Luzzo
+    given-names: Daniele
+    affiliation: University of Turin
+    email: daniele.luzzo@gmail.com
+abstract: >
+  ToolAgent is a cognitive enforcement and auditing framework designed to ensure
+  decision integrity, bias prevention, and auditability in automated systems.
+  It integrates CQRS, Clean Architecture, and Event-Driven Design principles,
+  following UN AI Ethics, NIST AI RMF, and ISO/IEC 42001 standards.
+version: 1.0.0
+date-released: 2025-10-29
+license: CC-BY-NC-ND-4.0
+repository-code: https://github.com/dan-74/toolagent-public
+url: https://doi.org/10.5281/zenodo.xxxxxxx
+doi: 10.5281/zenodo.xxxxxxx
+keywords:
+  - cognitive integrity
+  - auditability
+  - bias prevention
+  - AI governance
+  - CQRS
+  - NIST compliance
