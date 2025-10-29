@@ -1,0 +1,39 @@
+preset_id: cognitive_bias_prevention
+description: >
+  Regole di prevenzione dei bias cognitivi e meta-razionali per Codex GPT.
+  Basate su framework ONU/NIST/UNESCO 2025, mirano a garantire decision hygiene,
+  validita epistemica e affidabilita cognitiva nella generazione e validazione del codice.
+
+version: "2025.10.19"
+author: "Codex GPT Governance Group"
+schema: "ToolAgent Specification v5.0"
+
+cognitive_bias_controls:
+  contrarian_review: true                 # Controllo antitetico obbligatorio per mitigare bias di conferma
+  semantic_reframing: every_3_iterations  # Rivalutazione semantica periodica per mitigare framing bias
+  confidence_calibration: enforced        # Obbligo di indicare livello di confidenza esplicito
+  falsification_check: required           # Auto-falsificazione e ricerca controesempi
+  pattern_frequency_audit: enabled        # Segnalazione automatica di pattern ripetuti senza validazione esterna
+  knowledge_balance_ratio: [0.6, 0.4]     # 60% pattern noti / 40% esplorativi (euristica anti-overfitting)
+  decision_traceability: "verified/unverifiable"  # Ogni decisione marcata come verificabile o non verificabile
+  audit_link: "infrastructure/audit/cognitive_debias_log.yaml"  # Log dedicato al monitoraggio dei controlli cognitivi
+
+integration:
+  applies_to:
+    - Codex GPT main orchestration
+    - agents.md specification
+    - CI/CD validation pipelines
+  enforcement_mode: "advisory-strict"     # Consente validazione automatica, ma segnala anche deviazioni tollerate
+  reporting:
+    enabled: true
+    destination: "logs/cognitive_bias_reports/"
+    format: "JSONL"
+    retention_days: 90
+
+metadata:
+  validated_by: "World Bank / NIST Cognitive Integrity Group"
+  compliance_refs:
+    - "NIST SP 800-53 Rev.5 (IA-5, AU-12)"
+    - "ISO/IEC 42001:2023 Artificial Intelligence Management System"
+    - "UNESCO AI Ethics Framework 2023"
+  last_audit: "2025-10-19"

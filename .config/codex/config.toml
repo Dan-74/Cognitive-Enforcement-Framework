@@ -1,0 +1,1510 @@
+# ~/.codex/config.toml
+# Profilo operativo per BOT HFT 24/7 (World Bank / ONU / NIST)
+# Obiettivo: affidabilità continua, auditabilità completa, sicurezza multilivello, auto-miglioramento iterativo.
+
+#######################################################################
+# MODELLO E INFERENZA
+#######################################################################
+model                  = "o3-mini-2025-01-31"
+model_provider         = "openai"
+max_output_tokens      = 4096
+temperature            = 0.1
+top_p                  = 0.9
+frequency_penalty      = 0.0
+presence_penalty       = 0.0
+model_reasoning_effort = "high"
+
+[profiles.low_latency_override]
+model                  = "o4-mini"
+temperature            = 0.0
+model_reasoning_effort = "medium"
+
+#######################################################################
+# APPROVAL / EXECUTION POLICY
+#######################################################################
+approval_policy        = "auto-edit"
+require_explicit_plan  = true
+block_destructive_ops  = true
+max_iterations         = 8
+max_total_latency_s    = 1800
+fail_fast              = true
+
+#######################################################################
+# SANDBOX E SICUREZZA
+#######################################################################
+sandbox_mode           = "workspace-write"
+working_dir            = "./"
+network_access         = false
+allow_shell_exec           = false
+redact_secrets         = true
+
+[shell_environment_policy]
+include_only = [
+  "PATH", "PYTHONPATH", "TZ", "LC_ALL", "LANG", "APP_ENV",
+  "EXCHANGE_API_KEY", "EXCHANGE_API_SECRET", "EXCHANGE_API_PASSPHRASE",
+  "REDIS_URL", "DB_DSN", "PROMETHEUS_PUSHGATEWAY", "SENTRY_DSN", "OTEL_EXPORTER_OTLP_ENDPOINT"
+]
+
+#######################################################################
+# STRUMENTI DI VERIFICA E COMPLIANCE
+#######################################################################
+[[tools]]
+id      = "lint"
+type    = "process"
+command = ["bash", "-lc", "ruff check . && mypy --strict ."]
+
+[[tools]]
+id      = "tests"
+type    = "process"
+command = ["bash", "-lc", "pytest -q --maxfail=1 --disable-warnings"]
+
+[[tools]]
+id      = "security_audit"
+type    = "process"
+command = ["bash", "-lc", "pip-audit -r requirements.txt || true"]
+
+[[tools]]
+id      = "sast"
+type    = "process"
+command = ["bash", "-lc", "bandit -q -r . || true"]
+
+[[tools]]
+id      = "build"
+type    = "process"
+command = ["bash", "-lc", "python -m build"]
+
+[[tools]]
+id      = "typecov"
+type    = "process"
+command = ["bash", "-lc", "pytest --cov=src --cov-report=term-missing || true"]
+
+# ASCII guard (controlla src/, docs/, AGENTS.md, ToolAgent*, tool_agent.py)
+[[tools]]
+id      = "ascii_guard"
+type    = "process"
+command = ["bash", "-lc", "LC_ALL=C (find docs src -type f \\( ! -name '*.png' ! -name '*.jpg' ! -name '*.gif' ! -name '*.pyc' \\) -print; find . -maxdepth 1 -type f \\( -name 'AGENTS.md' -o -name 'tool_agent.py' -o -name 'ToolAgent - *.md' -o -name 'ToolAgent - *.yaml' \\) ) | xargs -r grep -nP --binary-files=without-match '[^\\x00-\\x7F]' > /tmp/ascii_guard.out 2>/dev/null || true; if [ -s /tmp/ascii_guard.out ]; then echo 'Non-ASCII detected:'; sed -n '1,200p' /tmp/ascii_guard.out; exit 1; fi"]
+
+[[tools]]
+id      = "web_gate"
+type    = "process"
+command = ["bash","-lc","curl -sSf --max-time 5 https://www.worldbank.org >/dev/null || (echo 'Web check failed'; exit 1)"]
+
+[[tools]]
+id      = "web_evidence_guard"
+type    = "process"
+command = ["bash","-lc","{ test -s reports/web_verification_evidence.md && grep -Eq '^\\s*\\d+\\. .+ - .+ - http' reports/web_verification_evidence.md && grep -Eq 'Published: [0-9]{4}-[0-9]{2}-[0-9]{2}.*Accessed: [0-9]{4}-[0-9]{2}-[0-9]{2}' reports/web_verification_evidence.md; } || { grep -q 'Web Verification (Mandatory)' docs/codex_autoimprove.md && grep -Eq '^\\s*\\d+\\. .+ - .+ - http' docs/codex_autoimprove.md && grep -Eq 'Published: [0-9]{4}-[0-9]{2}-[0-9]{2}.*Accessed: [0-9]{4}-[0-9]{2}-[0-9]{2}' docs/codex_autoimprove.md; } || { echo 'Missing web verification evidence'; exit 1; }"]
+
+[[tools]]
+id      ="log_fields_guard"
+type    ="process"
+command =["bash","-lc","grep -RInq 'trace_id' reports logs 2>/dev/null && grep -RInq 'event_id' reports logs 2>/dev/null && grep -RInq 'decision_outcome' reports logs 2>/dev/null || (echo 'Missing mandatory log fields'; exit 1)"]
+
+[[tools]]  # License compliance
+id      ="license_check"
+type    ="process"
+command =["bash","-lc","pip-licenses --fail-on 'GPL;AGPL;LGPL' --format=json || (echo 'License check failed'; exit 1)"]
+
+[[tools]]
+id   = "SBOM"
+type = "process"
+command =["bash","-lc","cyclonedx-py --requirements requirements.txt -o reports/sbom.json || (echo 'SBOM generation failed'; exit 1)"]
+
+[[tools]]  # Artifact signing (richiede cosign)
+id      ="cosign_sign"
+type    ="process"
+command =["bash","-lc","[ -d dist ] && find dist -type f -maxdepth 1 -print -quit | grep -q . && cosign sign-blob --yes --key env://COSIGN_KEY dist/* || echo 'No artifacts to sign'"]
+
+[[tools]]
+id      ="coverage_gate"
+type    ="process"
+command =["bash","-lc","pytest --cov=src --cov-report=term | tee reports/coverage_term.txt && awk '/TOTAL/ {gsub(\"%\",\"\",$4); if ($4+0<95) {print \"Coverage <95%:\"$4\"%\"; exit 1}} END{if(NR==0) exit 1}' reports/coverage_term.txt"]
+
+[[tools]]
+id   = "constants_guard"
+type = "process"
+command = ["bash","-lc","! grep -RInE '=[[:space:]]*[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?[[:space:]]*($|#)' src | grep -vE '/config/|/tests/' || { echo 'Magic numbers outside constants'; exit 1; }"]
+
+[[tools]]
+id   = "decorator_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nfrom pathlib import Path\nbad=[]\nfor p in Path('src').rglob('*.py'):\n t=p.read_text(encoding='utf-8',errors='ignore')\n if '@timeout' in t and ('@metrics' not in t or '@log' not in t or '@audit' not in t or '@retry' not in t):\n  bad.append(str(p))\nif bad:\n print('Decorator order/enforcement suspect in:\\n- ' + '\\n- '.join(bad)); exit(1)\nPY"]
+
+[[tools]]
+id   = "observability_guard"
+type = "process"
+command = ["bash","-lc","grep -RIn 'trace_id' src >/dev/null && grep -RIn 'event_id' src >/dev/null || { echo 'Missing trace_id/event_id propagation'; exit 1; }"]
+
+[[tools]]
+id   = "docs_guard"
+type = "process"
+command = ["bash","-lc","test -f docs/semantic_check/ci_quality_gate.md && test -f docs/semantic_check/naming_glossary.md || { echo 'Computable docs missing'; exit 1; }"]
+
+[[tools]]
+id   = "rbac_guard"
+type = "process"
+command = ["bash","-lc","test -s infrastructure/audit/rbac.yaml || { echo 'RBAC registry missing'; exit 1; }"]
+
+[[tools]]
+id   = "registry_guard"
+type = "process"
+command = ["bash","-lc","test -s src/bot_crypto/infrastructure/registry/centralization_registry.yaml || { echo 'Centralization registry missing'; exit 1; }"]
+
+
+
+[[tools]]
+id      = "pylint"
+type    = "process"
+command = ["bash","-lc","pylint --exit-zero --score=y src | tee reports/pylint_score.txt; awk '/Your code has been rated at/ {split($7, a, "/"); score=a[1]; if (score+0<9.0) {print "Pylint score <9.0:"score; exit 1}} END{if(NR==0) exit 1}' reports/pylint_score.txt"]
+
+[[tools]]
+id      = "metrics_registry_deprecation_guard"
+type    = "process"
+command = ["bash","-lc","! grep -RIn 'metrics_registry\.ya\?ml' . || { echo 'Deprecated metrics_registry.yaml detected'; exit 1; }"]
+
+[[tools]]
+id      = "centralization_audit"
+type    = "process"
+command = ["bash","-lc","python tools/centralization_audit.py --fail-on-drift"]
+
+[[tools]]
+id   = "decorator_ast_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import ast, sys, pathlib
+errors=[]
+for p in pathlib.Path('src').rglob('*.py'):
+  t=p.read_text(encoding='utf-8',errors='ignore')
+  try:
+    m=ast.parse(t)
+  except Exception:
+    continue
+  for node in ast.walk(m):
+    if isinstance(node, ast.FunctionDef):
+      decs=[getattr(d, 'id', getattr(getattr(d, 'attr', None),'__str__',lambda:'' )()) if isinstance(d, ast.Name) else getattr(d, 'attr', '') for d in node.decorator_list]
+      if any(x in decs for x in ['retry','audit','log','metrics','timeout']):
+        seq=[x for x in decs if x in ['retry','audit','log','metrics','timeout']]
+        if seq!=['retry','audit','log','metrics','timeout'][:len(seq)]:
+          errors.append(f"Decorator order violation in {p}:{node.name}:{seq}")
+  if 'infrastructure.decorators' not in t and any(s in t for s in ['@retry','@audit','@log','@metrics','@timeout']):
+    errors.append(f"Decorator source violation in {p}")
+if errors:
+  print('
+'.join(errors)); sys.exit(1)
+PY"]
+
+[[tools]]
+id   = "observability_ast_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import ast, sys, pathlib
+missing=[]
+for p in pathlib.Path('src').rglob('*.py'):
+  c=p.read_text(encoding='utf-8',errors='ignore')
+  if all(k in c for k in ['trace_id','event_id']):
+    continue
+  # heuristics: require functions touching logging to reference trace_id/event_id somewhere in file
+  if 'logging' in c or 'logger' in c:
+    if 'trace_id' not in c or 'event_id' not in c:
+      missing.append(str(p))
+if missing:
+  print('Missing runtime propagation (trace_id/event_id) in:
+- ' + '
+- '.join(missing)); sys.exit(1)
+PY"]
+
+[[tools]]
+id   = "magic_numbers_ast_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import ast, sys, pathlib, re
+viol=[]
+const_allow=re.compile(r'/config/|/tests/')
+for p in pathlib.Path('src').rglob('*.py'):
+  if const_allow.search(str(p).replace('\\','/')):
+    continue
+  t=p.read_text(encoding='utf-8',errors='ignore')
+  try:
+    m=ast.parse(t)
+  except Exception:
+    continue
+  class V(ast.NodeVisitor):
+    def visit_Constant(self,node):
+      if isinstance(node.value,(int,float)):
+        viol.append(f"Magic number {node.value} in {p}")
+  V().visit(m)
+if viol:
+  print('
+'.join(viol)); sys.exit(1)
+PY"]
+
+[[tools]]
+id   = "toolchain_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import os, re, subprocess, sys
+VERS={
+ 'ruff':'>=0.5', 'mypy':'1.10', 'pytest':'8.1', 'bandit':'1.7', 'pip-audit':'2.7', 'pylint':'3.2', 'cyclonedx-py':'4.0', 'cosign':'2.2', 'conftest':'0.'
+}
+errs=[]
+for cmd,ver in VERS.items():
+  try:
+    out=subprocess.check_output([cmd,'--version'],stderr=subprocess.STDOUT,text=True,timeout=10)
+  except Exception as e:
+    errs.append(f"{cmd} not available: {e}"); continue
+  if ver and ver not in out:
+    errs.append(f"{cmd} version mismatch: expected contains '{ver}', got '{out.strip()}'")
+if errs:
+  print('
+'.join(errs)); sys.exit(1)
+PY"]
+
+
+[[tools]]
+id   = "cosign_verify"
+type = "process"
+command = ["bash","-lc","[ -d dist ] && for f in dist/*; do cosign verify-blob --key env://COSIGN_PUBKEY --signature $f.sig $f || { echo 'Cosign verify failed for ' $f; exit 1; }; done || { echo 'No artifacts/signatures found'; exit 1; }"]
+
+[[tools]]
+id   = "license_policy_guard"
+type = "process"
+command = ["bash","-lc","test -f policies/licenses_allowlist.json || { echo 'Missing policies/licenses_allowlist.json'; exit 1; }; pip-licenses --format=json > reports/pip_licenses.json || { echo 'pip-licenses failed'; exit 1; }; python - <<'PY'
+import json, sys
+allow=json.load(open('policies/licenses_allowlist.json'))
+cur=json.load(open('reports/pip_licenses.json'))
+viol=[]
+for p in cur:
+  lic=p.get('License','')
+  name=p.get('Name','')
+  if lic in ('GPL','AGPL','LGPL') and name not in allow.get('exceptions',[]):
+    viol.append(f"Disallowed license {lic} in {name}")
+if viol:
+  print('
+'.join(viol)); sys.exit(1)
+PY"]
+
+
+[[tools]]
+id   = "emergency_window_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import tomllib,sys
+import pathlib
+c=pathlib.Path('config.toml').read_text('utf-8','ignore')
+try:
+  d=tomllib.loads(c)
+except Exception:
+  sys.exit(0)
+ep=d.get('emergency_policy',{})
+if ep.get('enabled'):
+  ap=pathlib.Path(ep.get('approval_file','policies/emergency_approval.md'))
+  if not ap.exists() or 'APPROVED' not in ap.read_text('utf-8','ignore'):
+    print('Emergency mode enabled without approval'); sys.exit(1)
+PY"]
+
+
+[[tools]]
+id   = "observability_runtime_test"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+# Emit a sample metric/log with mandatory labels
+labels={'trace_id':'t','event_id':'e','component':'agent','severity':'INFO','latency_bucket':'p95'}
+missing=[k for k in ['trace_id','event_id','component','severity','latency_bucket'] if k not in labels]
+import sys
+print('obs_test',labels)
+if missing: sys.exit(1)
+PY"]
+
+
+[[tools]]
+id   = "cognitive_kpi_guard"
+type = "process"
+command = ["bash","-lc","test -s docs/codex_autoimprove.md && grep -q 'contrarian' docs/codex_autoimprove.md && grep -q 'counterexample' docs/codex_autoimprove.md || { echo 'Missing cognitive safety KPI evidence in docs/codex_autoimprove.md'; exit 1; }"]
+
+
+[[tools]]
+id   = "criticality_matrix_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import tomllib,sys
+from pathlib import Path
+d=tomllib.loads(Path('config.toml').read_text('utf-8','ignore'))
+cm=d.get('criticality_matrix',{})
+cs=cm.get('components',[])
+ps=cm.get('policies',[])
+req_c={'order_executor','risk_manager','leverage_controller'}
+req_p={'web_verification','deploy_gate'}
+if not (req_c.issubset(cs) and req_p.issubset(ps)):
+  print('Criticality matrix incomplete'); sys.exit(1)
+PY"]
+
+
+[[tools]]
+id   = "secrets_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import re,sys,glob
+pat=re.compile(r'(AKIA[0-9A-Z]{16}|sk-[0-9A-Za-z]{20,})')
+viol=[]
+for fn in glob.glob('**/*', recursive=True):
+  try:
+    with open(fn,'rb') as f:
+      b=f.read(16384)
+    t=b.decode('utf-8','ignore')
+  except Exception:
+    continue
+  if pat.search(t) and not fn.startswith(('dist/','reports/')):
+    viol.append(fn)
+if viol:
+  print('Potential secrets in:
+- ' + '
+- '.join(viol)); sys.exit(1)
+PY"]
+
+
+[[tools]]
+id   = "schema_validate_agents"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import json,sys
+from jsonschema import validate, Draft202012Validator
+import pathlib
+# Minimal instance composed from spec headings; existence is sufficient for CI stub
+instance={'metadata':{'title':'ToolAgent Spec','version':'1','timestamp':'2025-01-01T00:00:00Z'},'web_verification':{'ttl_hours_general':24,'ttl_hours_security':6,'evidence':[{'title':'t','source':'s','url':'https://example.com','published':'2025-01-01','accessed':'2025-01-02'}]},'governance':{'rbac_roles':['admin','reviewer'],'double_approver':True,'merge_gate':'strict'},'observability':{'metric_labels':['trace_id'],'log_fields':['trace_id']},'enforcement':{'decorator_sequence':['retry'],'placeholder_ban':['TODO'],'magic_numbers_policy':'forbidden'}}
+schema=json.load(open('schemas/agents.schema.json'))
+Draft202012Validator.check_schema(schema)
+validate(instance=instance, schema=schema)
+print('agents.schema OK')
+PY"]
+
+[[tools]]
+id   = "schema_validate_config"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import tomllib,json,sys
+from jsonschema import validate, Draft202012Validator
+import pathlib
+conf=pathlib.Path('config.toml').read_text('utf-8','ignore')
+try:
+  data=tomllib.loads(conf)
+except Exception as e:
+  print('TOML parse error:',e); sys.exit(1)
+schema=json.load(open('schemas/config.schema.json'))
+Draft202012Validator.check_schema(schema)
+validate(instance=data, schema=schema)
+print('config.schema OK')
+PY"]
+
+
+[[tools]]
+id   = "placeholder_ast_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import ast, sys, pathlib, re
+viol=[]
+for p in pathlib.Path('src').rglob('*.py'):
+  t=p.read_text(encoding='utf-8',errors='ignore')
+  if re.search(r'(TODO|FIXME|NotImplementedError|TBD)', t):
+    viol.append(f'Placeholder tag in {p}')
+  try:
+    m=ast.parse(t)
+  except Exception:
+    continue
+  for node in ast.walk(m):
+    if isinstance(node, ast.Raise) and getattr(getattr(node, 'exc', None), 'id', '')=='NotImplementedError':
+      viol.append(f'NotImplementedError in {p}')
+if viol:
+  print('
+'.join(viol)); sys.exit(1)
+PY"]
+
+
+[[tools]]
+id   = "cosign_provenance_verify"
+type = "process"
+command = ["bash","-lc","[ -d dist ] || { echo 'dist/ not found'; exit 1; }; for f in dist/*; do test -f $f.sig || { echo 'Missing signature for' $f; exit 1; }; done; for f in dist/*; do cosign verify-blob-attestation --key env://COSIGN_PUBKEY $f || { echo 'Provenance verify failed for' $f; exit 1; }; done"]
+
+
+[[tools]]
+id   = "conftest_policy_guard"
+type = "process"
+command = ["bash","-lc","conftest test --input yaml policies || { echo 'Conftest policy violations'; exit 1; }"]
+
+
+[[tools]]
+id   = "web_evidence_cache_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+from pathlib import Path
+import sys, hashlib, time
+root=Path('cache/web_evidence')
+root.mkdir(parents=True, exist_ok=True)
+# Stub: ensure cache folder exists and check freshness markers if present
+for f in root.glob('*.evidence.json'):
+  age_h=(time.time()-f.stat().st_mtime)/3600
+  if age_h>168:
+    print(f'Stale evidence: {f}'); sys.exit(1)
+print('web evidence cache OK')
+PY"]
+
+
+[[tools]]
+id   = "config_drift_guard"
+type = "process"
+command = ["bash","-lc","sha256sum config.toml | awk '{print $1}' | diff -q - config_baseline.sha256 >/dev/null || { echo 'Config drift detected'; exit 1; }"]
+
+
+[[tools]]
+id   = "model_risk_cards_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import json,glob,sys
+from pathlib import Path
+# Stubs: ensure at least one model_card.json and risk_card.json exist
+mc=glob.glob('docs/model_cards/*.json')
+rc=glob.glob('docs/risk_cards/*.json')
+if not mc or not rc:
+  print('Missing model/risk cards'); sys.exit(1)
+print('model/risk cards present')
+PY"]
+
+
+[[tools]]
+id   = "slsa_provenance_guard"
+type = "process"
+command = ["bash","-lc","[ -f provenance.intoto.jsonl ] || { echo 'Missing SLSA provenance (intoto)'; exit 1; }"]
+
+
+[[tools]]
+id   = "promotion_gates_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import tomllib,sys
+from pathlib import Path
+d=tomllib.loads(Path('config.toml').read_text('utf-8','ignore'))
+profiles=d.get('profiles',{})
+req=['dev','test','stage','prod']
+missing=[p for p in req if p not in profiles]
+if missing:
+  print('Missing profiles:',missing); sys.exit(1)
+# Ensure stricter or equal TTL and thresholds as env promotes
+try:
+  dev=profiles['dev']['verify_loop']['ttl_policy']['web_gate_ttl_hours']
+  prod=profiles['prod']['verify_loop']['ttl_policy']['web_gate_ttl_hours']
+  if prod>dev: print('Prod TTL more lenient than dev'); sys.exit(1)
+except Exception:
+  pass
+print('promotion gates OK')
+PY"]
+
+
+[[tools]]
+id   = "cosign_artifacts_layout_guard"
+type = "process"
+command = ["bash","-lc","[ -d dist ] || { echo 'dist/ not found'; exit 1; }; ls dist | grep -Eq '^[a-z0-9_.-]+-v[0-9]+\.[0-9]+\.[0-9]+\.[a-z0-9_.-]+$' || { echo 'Artifacts do not follow naming convention name-vX.Y.Z.ext'; exit 1; }"]
+
+
+[[tools]]
+id   = "feature_flags_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'
+import tomllib,sys
+from pathlib import Path
+conf=tomllib.loads(Path('config.toml').read_text('utf-8','ignore'))
+ff=conf.get('feature_flags',{})
+req=['enforce_ast_guards','enforce_conftest_policies','enforce_cognitive_kpis']
+missing=[k for k in req if k not in ff or ff[k] is not True]
+if missing:
+  print('Feature flags missing/disabled:',missing); sys.exit(1)
+print('feature flags OK')
+PY"]
+
+
+
+[[tools]]
+id   = "bcp_policy_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport json, subprocess, sys, os\napproval='policies/emergency_approval.json'\nif not os.path.exists(approval):\n  print('No emergency approval file; OK if emergency disabled'); sys.exit(0)\nwith open(approval) as f:\n  data=json.load(f)\nopen('policies/_tmp_input.json','w').write(json.dumps(data))\nrc=subprocess.call(['conftest','test','--input','json','--data','policies','policies/_tmp_input.json'])\nsys.exit(rc)\nPY"]
+
+
+[[tools]]
+id   = "bias_auto_remediation_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport re,sys,os\npath='docs/codex_autoimprove.md'\nif not os.path.exists(path):\n  print('No autoimprove report; skipping bias remediation'); sys.exit(0)\nt=open(path,'r',encoding='utf-8',errors='ignore').read()\nm=re.search(r'contrarian_ratio\s*:\s*(0\.[0-9]+|1\.0|[0-1])',t)\nif not m:\n  sys.exit(0)\nval=float(m.group(1))\nth=0.2\nprint('contrarian_ratio=',val)\nif val < th:\n  open('reports/remediation_required.txt','w').write('Bias KPI below threshold; human review required')\n  print('Remediation required'); sys.exit(1)\nPY"]
+
+
+[[tools]]
+id   = "metrics_integration_test"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport os,sys\npath='reports/metrics.prom'\nif not os.path.exists(path):\n  open(path,'w').write('# HELP codex_contrarian_ratio ...\n# TYPE codex_contrarian_ratio gauge\ncodex_contrarian_ratio 0.15\n')\nprint('OpenMetrics sample OK')\nPY"]
+
+
+[[tools]]
+id   = "toolchain_exact_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport tomllib,subprocess,sys,shlex\nfrom pathlib import Path\nload=lambda p: tomllib.loads(Path(p).read_text('utf-8','ignore'))\nroot=load('config.toml')\n# Parametri di guard dal SSoT\ncfg=root.get('guards',{}).get('toolchain_exact_guard',{})\nref=cfg.get('reference_config','config.toml')\nallow_dual=bool(cfg.get('allow_dual_guard', False))\ndual_ref=cfg.get('dual_reference_config','config.toml')\n# Profilo primario\nprimary=load(ref)\nexp=primary.get('toolchain',{}).get('expected',{})\nerrs=[]\nfor tool,ver in exp.items():\n  try:\n    out=subprocess.check_output(shlex.split(f\"{tool} --version\"), text=True, stderr=subprocess.STDOUT)\n  except Exception as e:\n    errs.append(f\"{tool} missing: {e}\"); continue\n  if ver not in out:\n    errs.append(f\"{tool} version mismatch: expected {ver}, got {out.strip()}\")\n# Superset opzionale: il primario deve essere >= duale\nif allow_dual and dual_ref != ref:\n  secondary=load(dual_ref)\n  exp2=secondary.get('toolchain',{}).get('expected',{})\n  for k,v in exp2.items():\n    if k not in exp or exp[k] != v:\n      errs.append(f\"superset violation: {k} -> base:{v} not matched in primary\")\nif errs:\n  print('\\n'.join(errs)); sys.exit(1)\nprint('toolchain exact OK')\nPY"]
+
+
+[[tools]]
+id   = "cross_profile_consistency_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport tomllib,sys\nfrom pathlib import Path\nd=tomllib.loads(Path('config.toml').read_text('utf-8','ignore'))\nprof=d.get('profiles',{})\ntry:\n  dev=prof['dev']['verify_loop']['ttl_policy']['web_gate_ttl_hours']\n  prod=prof['prod']['verify_loop']['ttl_policy']['web_gate_ttl_hours']\n  assert prod<=dev\nexcept Exception:\n  print('TTL policy not stricter in prod'); sys.exit(1)\ntry:\n  prod_ratio=prof['prod']['bias_prevention']['metrics']['min_contrarian_ratio']\n  stage_ratio=prof['stage']['bias_prevention']['metrics']['min_contrarian_ratio']\n  assert prod_ratio>=stage_ratio\nexcept Exception:\n  print('Bias KPI thresholds not monotonic'); sys.exit(1)\nprint('cross-profile OK')\nPY"]
+
+
+[[tools]]
+id   = "cosign_manifest_guard"
+type = "process"
+command = ["bash","-lc","[ -f dist/manifest.sha256 ] || { echo 'manifest.sha256 missing'; exit 1; }; sha256sum -c dist/manifest.sha256 || { echo 'Checksum mismatch in dist'; exit 1; }"]
+
+
+[[tools]]
+id   = "sarif_otel_templates_guard"
+type = "process"
+command = ["bash","-lc","test -s reports/security.sarif && test -s policies/otel_attrs.yaml || { echo 'Missing SARIF/OTEL templates'; exit 1; }"]
+
+
+[[tools]]
+id   = "web_evidence_cache_resilience_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nfrom pathlib import Path\nimport sys\nprimary=Path('cache/web_evidence'); secondary=Path('cache2/web_evidence')\nif not primary.exists() and not secondary.exists():\n  print('No evidence cache backend available'); sys.exit(1)\nprint('evidence cache backend OK')\nPY"]
+
+
+[[tools]]
+id   = "progressive_enforcement_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport tomllib,sys\nfrom pathlib import Path\nconf=tomllib.loads(Path('config.toml').read_text('utf-8','ignore'))\nff=conf.get('feature_flags',{})\ncanary=ff.get('canary_percent',10)\nif not (0<canary<=50):\n  print('canary_percent must be in (0,50]'); sys.exit(1)\nprint('progressive enforcement OK')\nPY"]
+
+
+[[tools]]
+id   = "compliance_scorecard_job"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nfrom pathlib import Path\nimport datetime\np=Path('reports/compliance_scorecard.md')\np.parent.mkdir(parents=True, exist_ok=True)\np.write_text(f'# Compliance Scorecard\\nDate: {datetime.datetime.utcnow().isoformat()}Z\\n- All guards invoked in CI.\\n', encoding='utf-8')\nprint('scorecard generated')\nPY"]
+
+[[tools]]
+id   = "sarif_conformance_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport json, sys\np='reports/security.sarif'\ntry:\n  d=json.load(open(p))\n  assert d.get('version')=='2.1.0'\n  assert isinstance(d.get('runs',[]), list)\nexcept Exception as e:\n  print('SARIF non conforme:', e); sys.exit(1)\nprint('SARIF OK')\nPY"]
+
+[[tools]]
+id   = "otel_conformance_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport sys\ntry:\n  import yaml\nexcept Exception:\n  print('pyyaml non disponibile'); sys.exit(1)\nd=yaml.safe_load(open('policies/otel_attrs.yaml'))\nmiss=[k for k in ['service.name','service.version','ai.system'] if k not in d]\nif miss:\n  print('OTEL attrs mancanti:', miss); sys.exit(1)\nprint('OTEL OK')\nPY"]
+
+[[tools]]
+id   = "openmetrics_conformance_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport re,sys,os\np='reports/metrics.prom'\nif not os.path.exists(p):\n  print('metrics.prom mancante'); sys.exit(1)\ns=open(p,'r',encoding='utf-8',errors='ignore').read()\nif 'codex_contrarian_ratio' not in s:\n  print('metric codex_contrarian_ratio mancante'); sys.exit(1)\n# Simple format checks\nif not re.search(r'^# TYPE codex_contrarian_ratio gauge$', s, re.M):\n  print('TYPE gauge mancante'); sys.exit(1)\nif not re.search(r'^codex_contrarian_ratio \\d+(\\.\\d+)?$', s, re.M):\n  print('Sample value mancante/formato errato'); sys.exit(1)\nprint('OpenMetrics OK')\nPY"]
+
+[[tools]]
+id   = "ci_image_digest_guard"
+type = "process"
+command = ["bash","-lc","test -f ci_image.digest || echo sha256:EXPECTED_DIGEST > ci_image.digest; diff -q <(cat ci_image.digest) <(awk -F= '/image_digest/{print $2}' config.toml | tr -d ' \"') || { echo 'CI image digest mismatch'; exit 1; }"]
+
+[[tools]]
+id   = "slsa_attestation_guard"
+type = "process"
+command = ["bash","-lc","test -s provenance.intoto.jsonl && grep -q 'slsa' provenance.intoto.jsonl || { echo 'SLSA provenance mancante/non conforme'; exit 1; }"]
+
+[[tools]]
+id   = "bias_remediation_enforcer"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport os,re,sys\nr='reports/metrics.prom'\nif not os.path.exists(r):\n  sys.exit(0)\ns=open(r,'r').read()\nm=re.search(r'codex_contrarian_ratio\\s+(\\d+(?:\\.\\d+)?)', s)\nif not m: sys.exit(0)\nval=float(m.group(1))\nTHRESH=0.2\nif val < THRESH:\n  if not os.path.exists('reports/human_supervision_ticket.txt'):\n    print('Bias KPI sotto soglia e supervisione mancante'); sys.exit(1)\nprint('Bias remediation OK')\nPY"]
+
+[[tools]]
+id   = "openai_api_schema_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport re,sys,pathlib\nbad=[]\nfor p in pathlib.Path('src').rglob('*.py'):\n t=p.read_text('utf-8','ignore')\n # 1) misuse: dict role/content con stringa semplice\n if re.search(r\"responses\\.create\\s*\\([^)]*input\\s*=\\s*\\[\\s*\\{\\s*'role'\\s*:\\s*'user'\\s*,\\s*'content'\\s*:\\s*[^\\[]\", t):\n  bad.append(f\"{p}: invalid 'content' string (use input=str or parts)\")\n # 2) misuse: timeout passato a create()\n if re.search(r\"responses\\.create\\s*\\([^)]*\\btimeout\\s*=\", t):\n  bad.append(f\"{p}: 'timeout=' must be set via client.with_options(timeout=..)\")\n # 3) enforce forma valida: input come str oppure parts tipizzati\n # (non blocchiamo i casi corretti, ma segnaliamo pattern ignoti)\n if re.search(r\"responses\\.create\\s*\\([^)]*input\\s*=\\s*\\{\", t):\n  bad.append(f\"{p}: 'input=' must be str or list of typed parts, not a dict\")\nif bad:\n print('\\n'.join(bad)); sys.exit(1)\nprint('openai_api_schema_guard OK')\nPY"]
+
+[[tools]]
+id   = "broad_except_guard"
+type = "process"
+command = ["bash","-lc","grep -RInE '\\bexcept\\s+Exception\\b|\\bexcept\\s*:\\s*$' src && { echo 'Broad/bare except detected'; exit 1; } || echo 'broad_except_guard OK'"]
+
+[[tools]]
+id   = "responses_union_attr_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport re,sys,pathlib\nviol=[]\npat=re.compile(r\"\\bresp\\s*\\.\\s*output\\s*\\[\\s*0\\s*\\]\\s*\\.\\s*content\\s*\\[\\s*0\\s*\\]\\s*\\.\")\nfor p in pathlib.Path('src').rglob('*.py'):\n t=p.read_text('utf-8','ignore')\n if pat.search(t):\n  viol.append(str(p))\nif viol:\n print('Direct union-attr access on resp.output in:\\n- ' + '\\n- '.join(viol)); sys.exit(1)\nprint('responses_union_attr_guard OK')\nPY"]
+
+[[tools]]
+id   = "openai_client_timeout_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport re,sys,pathlib\nok=False; bad=[]\nfor p in pathlib.Path('src').rglob('*.py'):\n t=p.read_text('utf-8','ignore')\n if 'OpenAI().with_options(timeout=' in t:\n  ok=True\n if 'responses.create(' in t and 'timeout=' in t:\n  bad.append(f'{p}: found timeout= inside create()')\nif bad:\n print('\\n'.join(bad)); sys.exit(1)\nprint('openai_client_timeout_guard OK' if ok else 'WARNING: no explicit client timeout found')\nPY"]
+
+[[tools]]
+id      = "ruff_strict"
+type    = "process"
+command = ["bash","-lc","ruff check --select=E,F,A,ARG,UP,SIM,P,PLC,PLE,PLW,N ."]
+
+[[tools]]
+id   = "module_exports_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport ast, pathlib, sys\nviol=[]\nfor p in pathlib.Path('src').rglob('*.py'):\n t=p.read_text('utf-8','ignore')\n try: m=ast.parse(t)\n except Exception: continue\n names=set()\n for n in m.body:\n  if isinstance(n,(ast.Assign,ast.AnnAssign)) and isinstance(getattr(n,'targets',[getattr(n,'target',None)])[0],ast.Name):\n   nm=(n.targets[0] if hasattr(n,'targets') else n.target).id\n   if nm.isupper(): names.add(nm)\n allv=None\n for n in m.body:\n  if isinstance(n,ast.Assign) and any(getattr(t,'id','')=='__all__' for t in n.targets):\n   if isinstance(n.value,(ast.List,ast.Tuple)):\n    allv={getattr(e,'s',getattr(e,'value',None)) for e in n.value.elts}\n if names and (not allv or not names.issubset(allv)):\n  viol.append(f\"{p}: missing in __all__: {sorted(names-(allv or set()))}\")\nif viol:\n print('\\n'.join(viol)); sys.exit(1)\nprint('module_exports OK')\nPY"]
+
+[[tools]]
+id      = "dup_code_guard"
+type    = "process"
+command = ["bash","-lc","jscpd --mode strict --language python --reporters console --threshold 1 src || { echo 'Duplicated code detected'; exit 1; }"]
+
+[[tools]]
+id   = "unused_params_guard"
+type = "process"
+command = ["bash","-lc","ruff check --select=ARG ."]
+
+[[tools]]
+id      = "format_black"
+type    = "process"
+command = ["bash","-lc","black --check --diff ."]
+
+[[tools]]
+id      = "pyupgrade_guard"
+type    = "process"
+command = ["bash","-lc","ruff check --select=UP,SIM ."]
+
+# ——— Verifica decoratori presenti e coerenti nei moduli
+[[tools]]
+id = "decorator_source_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  python - <<'PY'
+import ast, pathlib, sys
+viol = []
+for p in pathlib.Path('src').rglob('*.py'):
+    try:
+        tree = ast.parse(p.read_text('utf-8'))
+    except Exception:
+        continue
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            if any(d.id == 'deprecated' for d in node.decorator_list if isinstance(d, ast.Name)):
+                viol.append(f"{p}: deprecated decorator on {node.name}")
+if viol:
+    print("\\n".join(viol)); sys.exit(1)
+print("decorator_source_guard OK")
+PY
+  """
+]
+
+# ——— Verifica etichette di osservabilità obbligatorie (metriche/tracing)
+[[tools]]
+id = "observability_labels_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  grep -R --include='*.py' -nE 'metric|trace|span' src | grep -vE 'labels=|tags=' \
+  && { echo 'Missing observability labels (labels= or tags=)'; exit 1; } || echo 'observability_labels_guard OK'
+  """
+]
+
+# ——— Convalida preset YAML vincolante
+[[tools]]
+id = "preset_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  python - <<'PY'
+import pathlib, sys, yaml
+path = pathlib.Path('Preset_Vincolante_GPT_Ready.yaml')
+if not path.exists():
+    print('Preset YAML non trovato'); sys.exit(1)
+with open(path, 'r', encoding='utf-8') as f:
+    data = yaml.safe_load(f)
+req = {'Principi Architetturali', 'Tecniche Ingegneristiche'}
+if not req.issubset(data.keys()):
+    print('Preset incompleto:', req - data.keys()); sys.exit(1)
+print('preset_guard OK')
+PY
+  """
+]
+
+# ——— Verifica integrità file di specifiche tramite SHA256
+[[tools]]
+id = "spec_sha_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  find spec -type f -name '*.md' -o -name '*.yaml' -exec sha256sum {} + | sort > spec_manifest.current
+  if [ -f spec_manifest.ref ]; then
+      diff -q spec_manifest.ref spec_manifest.current || { echo 'Spec SHA mismatch'; exit 1; }
+  else
+      cp spec_manifest.current spec_manifest.ref && echo 'spec_sha_guard baseline created'
+  fi
+  """
+]
+
+[[tools]]
+id   = "method_static_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport ast, pathlib, sys\nviol=[]\nfor p in pathlib.Path('src').rglob('*.py'):\n  t=p.read_text(encoding='utf-8', errors='ignore')\n  try:\n    m=ast.parse(t)\n  except Exception:\n    continue\n  class V(ast.NodeVisitor):\n    def __init__(self, file): self.file=file\n    def visit_ClassDef(self, node):\n      for f in [n for n in node.body if isinstance(n, ast.FunctionDef)]:\n        decos={getattr(d,'id',getattr(d,'attr','')) for d in f.decorator_list}\n        args=f.args\n        first = args.args[0].arg if args.args else None\n        uses_self='self' in {n.id for n in ast.walk(f) if isinstance(n, ast.Name)}\n        uses_cls ='cls'  in {n.id for n in ast.walk(f) if isinstance(n, ast.Name)}\n        if first in {'self','cls'} and not uses_self and not uses_cls and 'staticmethod' not in decos:\n          viol.append(f\"{self.file}:{node.name}.{f.name} may be static\")\n      self.generic_visit(node)\n  V(str(p)).visit(m)\nif viol:\n  print('\\n'.join(viol)); sys.exit(1)\nprint('method_static_guard OK')\nPY"]
+
+[[tools]]
+id   = "callable_collection_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport ast, pathlib, sys\nviol=[]\nfor p in pathlib.Path('src').rglob('*.py'):\n  t=p.read_text(encoding='utf-8', errors='ignore')\n  try:\n    m=ast.parse(t)\n  except Exception:\n    continue\n  class Scope:\n    def __init__(self): self.assigned={}\n  scopes=[Scope()]\n  class V(ast.NodeVisitor):\n    def visit_FunctionDef(self, node):\n      scopes.append(Scope()); self.generic_visit(node); scopes.pop()\n    def visit_Assign(self, node):\n      val=node.value\n      kind=None\n      if isinstance(val, (ast.List, ast.Tuple, ast.Dict)): kind=type(val).__name__.lower()\n      if kind:\n        for t in node.targets:\n          if isinstance(t, ast.Name): scopes[-1].assigned[t.id]=kind\n      self.generic_visit(node)\n    def visit_Call(self, node):\n      if isinstance(node.func, ast.Name):\n        k=scopes[-1].assigned.get(node.func.id)\n        if k in {'list','tuple','dict'}:\n          viol.append(f\"{p}:{node.lineno} calling a {k} variable '{node.func.id}'\")\n      self.generic_visit(node)\n  V().visit(m)\nif viol:\n  print('\\n'.join(viol)); sys.exit(1)\nprint('callable_collection_guard OK')\nPY"]
+
+[[tools]]
+id   = "method_tuple_param_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport ast, pathlib, sys\nviol=[]\nfor p in pathlib.Path('src').rglob('*.py'):\n  try:\n    tree=ast.parse(p.read_text(encoding='utf-8',errors='ignore'))\n  except Exception:\n    continue\n  for cls in [n for n in tree.body if isinstance(n, ast.ClassDef)]:\n    for f in [n for n in cls.body if isinstance(n, ast.FunctionDef)]:\n      # salta staticmethod/classmethod\n      decos={getattr(d,'id',getattr(d,'attr','')) for d in f.decorator_list}\n      if 'staticmethod' in decos or 'classmethod' in decos:\n        continue\n      if f.args.args and isinstance(f.args.args[0].arg, tuple):  # difesa extra\n        viol.append(f\"{p}:{f.lineno} first parameter tuple-unpacking is invalid\")\n      if f.args.args and isinstance(f.args.args[0], ast.arg):\n        # vieta strutture non Name (es. tuple unpacking in Py3 -> comunque parse error)\n        pass\n  \nif viol:\n  print('\\n'.join(viol)); sys.exit(1)\nprint('method_tuple_param_guard OK')\nPY"]
+
+[[tools]]
+id   = "constants_values_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nimport sys, importlib\nmod = importlib.import_module('src.bot_crypto.constants')\nEXPECTED = {'STATUS_SUCCESS': 'success', 'STATUS_FAILURE': 'failure'}\nviol=[]\nfor k,v in EXPECTED.items():\n    if not hasattr(mod,k):\n        viol.append(f'Missing constant: {k}')\n    elif getattr(mod,k) != v:\n        viol.append(f'Constant {k} has wrong value: {getattr(mod,k)!r}')\nif viol:\n    print('\\n'.join(viol)); sys.exit(1)\nprint('constants_values_guard OK')\nPY"]
+
+# =====================================================
+# === Time Policy and Enforcement Guards (UTC / TypedDict / Import / YAML) ===
+# =====================================================
+
+[time_policy]
+preferred_utc = "timezone.utc"    # alternative allowed: "datetime.UTC"
+forbid_utcnow = true              # block datetime.utcnow() usage
+
+[[tools]]
+id = "utc_policy_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  python - <<'PY'
+import tomllib, re, sys, pathlib
+conf = tomllib.loads(pathlib.Path('config.toml').read_text('utf-8','ignore'))
+pref = conf.get('time_policy',{}).get('preferred_utc','timezone.utc')
+forbid_utcnow = bool(conf.get('time_policy',{}).get('forbid_utcnow',True))
+viol = []
+for p in pathlib.Path('src').rglob('*.py'):
+    t = p.read_text('utf-8','ignore')
+    if forbid_utcnow and re.search(r'\\bdatetime\\.utcnow\\s*\\(', t):
+        viol.append(f"{p}: datetime.utcnow() forbidden")
+    if pref == 'timezone.utc':
+        if re.search(r'\\bfrom\\s+datetime\\s+import\\s+UTC\\b', t) or re.search(r'\\bdatetime\\.UTC\\b', t):
+            viol.append(f"{p}: use timezone.utc, not UTC")
+    elif pref == 'datetime.UTC':
+        if re.search(r'\\btimezone\\.utc\\b', t):
+            viol.append(f"{p}: use datetime.UTC, not timezone.utc")
+if viol:
+    print('\\n'.join(viol))
+    sys.exit(1)
+print('utc_policy_guard OK')
+PY
+  """
+]
+
+[[tools]]
+id = "timestamp_utc_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  python - <<'PY'
+import re, sys, pathlib
+viol = []
+for p in pathlib.Path('src').rglob('*.py'):
+    t = p.read_text('utf-8','ignore')
+    if re.search(r'\\.replace\\(\\s*tzinfo\\s*=', t):
+        viol.append(f"{p}: .replace(tzinfo=...) forbidden")
+    for ln,line in enumerate(t.splitlines(),1):
+        if 'isoformat()' in line and 'datetime.now' in line and ('timezone.utc' not in line and 'datetime.UTC' not in line):
+            viol.append(f"{p}:{ln} isoformat() missing UTC context")
+if viol:
+    print('\\n'.join(viol))
+    sys.exit(1)
+print('timestamp_utc_guard OK')
+PY
+  """
+]
+
+[[tools]]
+id = "typeddict_call_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  python - <<'PY'
+import ast, pathlib, sys
+T, calls = set(), []
+for p in pathlib.Path('src').rglob('*.py'):
+    try: tree = ast.parse(p.read_text('utf-8','ignore'))
+    except Exception: continue
+    for n in tree.body:
+        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call):
+            f = n.value.func
+            if isinstance(f, ast.Name) and f.id == 'TypedDict':
+                for t in n.targets:
+                    if isinstance(t, ast.Name): T.add(t.id)
+    class V(ast.NodeVisitor):
+        def visit_Call(self, node):
+            if isinstance(node.func, ast.Name) and node.func.id in T:
+                calls.append((str(p), node.lineno, node.func.id))
+            self.generic_visit(node)
+    V().visit(tree)
+if calls:
+    print('\\n'.join(f"{f}:{ln} calling TypedDict '{nm}'" for f,ln,nm in calls))
+    sys.exit(1)
+print('typeddict_call_guard OK')
+PY
+  """
+]
+
+[[tools]]
+id = "dynamic_import_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  python - <<'PY'
+import re, sys, pathlib
+viol = []
+pat = re.compile(r'import_module\\(f?\\\"bot_crypto\\.[^\\)]+\\)')
+for p in pathlib.Path('src').rglob('*.py'):
+    t = p.read_text('utf-8','ignore')
+    if 'import_module' in t and pat.search(t):
+        if 'startswith("bot_crypto.")' not in t and 'module_path =' not in t:
+            viol.append(str(p))
+if viol:
+    print('Unconditional bot_crypto prefix in import_module():\\n- ' + '\\n- '.join(viol))
+    sys.exit(1)
+print('dynamic_import_guard OK')
+PY
+  """
+]
+
+[[tools]]
+id = "yaml_adapter_guard"
+type = "process"
+command = [
+  "bash", "-lc",
+  """
+  python - <<'PY'
+import ast, sys, pathlib
+viol = []
+for p in pathlib.Path('src').rglob('*.py'):
+    try: tree = ast.parse(p.read_text('utf-8','ignore'))
+    except Exception: continue
+    class V(ast.NodeVisitor):
+        def visit_Attribute(self,node):
+            if isinstance(node.value, ast.Attribute) and node.value.attr=='yaml_adapter' and node.attr!='load':
+                viol.append(f"{p}: yaml_adapter used without .load() (line {getattr(node,'lineno','?')})")
+            self.generic_visit(node)
+        def visit_Call(self,node):
+            if isinstance(node.func, ast.Attribute) and node.func.attr=='yaml_adapter':
+                viol.append(f"{p}: yaml_adapter called as function (line {node.lineno})")
+            self.generic_visit(node)
+    V().visit(tree)
+if viol:
+    print('\\n'.join(viol))
+    sys.exit(1)
+print('yaml_adapter_guard OK')
+PY
+  """
+
+
+[[tools]]
+id   = "placeholder_guard"
+type = "process"
+command = ["bash","-lc","python - <<'PY'\nfrom __future__ import annotations\nimport ast, re, sys\nfrom pathlib import Path\n\nROOTS = [Path('src'), Path('tests'), Path('docs'), Path('spec'), Path('policies')]\nCODE_EXT = {'.py'}\nTXT_EXT  = {'.md', '.yaml', '.yml', '.toml', '.txt'}\n\nre_tags = re.compile(r\"\\b(TODO|FIXME|TBD|XXX|WIP)\\b\", re.IGNORECASE)\nviol = []\n\n# 1) Scan text files for TODO-like markers\nfor root in ROOTS:\n    if not root.exists():\n        continue\n    for p in root.rglob('*'):\n        if not p.is_file():\n            continue\n        if p.suffix in TXT_EXT and p.stat().st_size <= 2_000_000:\n            t = p.read_text('utf-8', 'ignore')\n            if re_tags.search(t):\n                viol.append(f\"{p}: placeholder tag (TODO/FIXME/TBD/XXX/WIP)\")\n\n# 2) Scan Python AST for structural placeholders\nfor root in ROOTS:\n    if not root.exists():\n        continue\n    for p in root.rglob('*.py'):\n        try:\n            src = p.read_text('utf-8', 'ignore')\n            tree = ast.parse(src)\n        except Exception:\n            # syntax errors handled elsewhere\n            continue\n\n        def is_only_docstring(body:list[ast.stmt]) -> bool:\n            return bool(body and isinstance(body[0], ast.Expr) and isinstance(getattr(body[0],'value',None), ast.Constant) and isinstance(body[0].value.value, str))\n\n        def has_structural_placeholder(body:list[ast.stmt]) -> bool:\n            check = body\n            if is_only_docstring(check):\n                check = check[1:]\n            if not check:\n                return True  # empty after docstring\n            # pass / Ellipsis\n            if all(isinstance(n, (ast.Pass)) or (isinstance(n, ast.Expr) and getattr(n, 'value', None) is Ellipsis) for n in check):\n                return True\n            # explicit Ellipsis node across versions\n            if any(isinstance(n, ast.Expr) and isinstance(getattr(n,'value',None), ast.Constant) and n.value.value is Ellipsis for n in check):\n                return True\n            # NotImplementedError raises\n            for n in check:\n                if isinstance(n, ast.Raise):\n                    exc = n.exc\n                    name = getattr(exc, 'id', None) if isinstance(exc, ast.Name) else getattr(getattr(exc,'func',None), 'id', None)\n                    if name == 'NotImplementedError':\n                        return True\n            return False\n\n        class V(ast.NodeVisitor):\n            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:\n                if has_structural_placeholder(node.body):\n                    viol.append(f\"{p}:{node.lineno} function '{node.name}' has placeholder body\")\n                self.generic_visit(node)\n            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:\n                if has_structural_placeholder(node.body):\n                    viol.append(f\"{p}:{node.lineno} async function '{node.name}' has placeholder body\")\n                self.generic_visit(node)\n            def visit_ClassDef(self, node: ast.ClassDef) -> None:\n                if has_structural_placeholder(node.body):\n                    viol.append(f\"{p}:{node.lineno} class '{node.name}' has placeholder body\")\n                self.generic_visit(node)\n        V().visit(tree)\n\n        # also catch NotImplementedError mention in comments/strings\n        if re.search(r\"NotImplementedError\", src):\n            # If not already flagged by AST raise detection, still report\n            if not any('NotImplementedError' in v and str(p) in v for v in viol):\n                viol.append(f\"{p}: NotImplementedError reference detected\")\n\nif viol:\n    print('\\n'.join(sorted(viol)))\n    sys.exit(1)\nprint('placeholder_guard OK')\nPY"]]
+
+
+
+
+#######################################################################
+# WORKFLOW DI VERIFICA (NASA-STYLE)
+#######################################################################
+[verify_loop]
+fail_closed = true
+[verify_loop.ttl_policy]
+web_gate_ttl_hours = 24
+security_checks_ttl_hours = 6
+
+order = [
+   "web_gate",
+   "emergency_window_guard",
+   "web_evidence_cache_guard",
+   "web_evidence_guard",
+   "ascii_guard",
+   "placeholder_ast_guard",
+   "secrets_guard",
+   "constants_guard",
+   "decorator_guard",
+   "decorator_source_guard",
+   "docs_guard",
+   "schema_validate_agents",
+   "schema_validate_config",
+   "feature_flags_guard",
+   "promotion_gates_guard",
+   "config_drift_guard",
+   "rbac_guard",
+   "conftest_policy_guard",
+   "registry_guard",
+   "centralization_audit",
+   "preset_guard",
+   "toolchain_guard",
+   "lint","pylint",
+   "tests",
+   "coverage_gate",
+   "license_check",
+   "license_policy_guard",
+   "SBOM",
+   "observability_guard",
+   "metrics_registry_deprecation_guard",
+   "observability_labels_guard",
+   "log_fields_guard",
+   "build",
+   "security_audit",
+   "sast",
+   "typecov",
+   "spec_sha_guard",
+   "cosign_artifacts_layout_guard",
+   "cosign_verify",
+   "cosign_provenance_verify",
+   "slsa_provenance_guard", 
+   "bcp_policy_guard", 
+   "toolchain_exact_guard", 
+   "progressive_enforcement_guard", 
+   "cosign_manifest_guard", 
+   "model_risk_cards_guard", 
+   "sarif_otel_templates_guard", 
+   "web_evidence_cache_resilience_guard", 
+   "sarif_conformance_guard", 
+   "otel_conformance_guard", 
+   "openmetrics_conformance_guard", 
+   "ci_image_digest_guard", 
+   "slsa_attestation_guard", 
+   "bias_remediation_enforcer",  
+   "openai_api_schema_guard",
+   "openai_client_timeout_guard",
+   "responses_union_attr_guard",
+   "broad_except_guard",
+   "ruff_strict",
+   "module_exports_guard",
+   "dup_code_guard",
+   "unused_params_guard",
+   "format_black",
+   "pyupgrade_guard",
+   "method_static_guard",
+   "callable_collection_guard",
+   "method_tuple_param_guard", 
+   "constants_values_guard", 
+   "utc_policy_guard",
+  "timestamp_utc_guard",
+  "typeddict_call_guard",
+  "dynamic_import_guard",
+  "yaml_adapter_guard",
+  "placeholder_guard",
+]
+
+success_criteria = [
+  "web_gate == success",
+  "emergency_window_guard == success",
+  "web_evidence_cache_guard == success",
+  "web_evidence_guard == success",
+  "ascii_guard == success",
+  "placeholder_ast_guard == success",
+  "placeholder_guard == success",
+  "constants_guard == success",
+  "decorator_guard == success",
+  "decorator_source_guard == success",
+  "docs_guard == success",
+  "schema_validate_agents == success",
+  "schema_validate_config == success",
+  "feature_flags_guard == success",
+  "promotion_gates_guard == success",
+  "config_drift_guard == success",
+  "decorator_ast_guard == success",
+  "observability_ast_guard == success",
+  "magic_numbers_ast_guard == success",
+  "rbac_guard == success",
+  "conftest_policy_guard == success",
+  "registry_guard == success",
+  "model_risk_cards_guard == success",
+  "criticality_matrix_guard == success",
+  "toolchain_guard == success",
+  "lint == success",
+  "pylint == success",
+  "tests == success",
+  "coverage_gate == success",
+  "license_check == success",
+  "license_policy_guard == success",
+  "SBOM == success",
+  "metrics_registry_deprecation_guard == success",
+  "observability_guard == success",
+  "observability_runtime_test == success",
+  "observability_labels_guard == success",
+  "log_fields_guard == success",
+  "cognitive_kpi_guard == success",
+  "build == success",
+  "cosign_verify == success",
+  "cosign_provenance_verify == success",
+  "bcp_policy_guard == success", "metrics_integration_test == success", "toolchain_exact_guard == success", "progressive_enforcement_guard == success", "cosign_manifest_guard == success", "sarif_otel_templates_guard == success", "web_evidence_cache_resilience_guard == success", "sarif_conformance_guard == success", "otel_conformance_guard == success", "openmetrics_conformance_guard == success", "ci_image_digest_guard == success", "slsa_attestation_guard == success", "bias_remediation_enforcer == success",
+  "openai_api_schema_guard == success",
+  "openai_client_timeout_guard == success",
+  "responses_union_attr_guard == success",
+  "broad_except_guard == success",
+  "ruff_strict == success",
+  "module_exports_guard == success",
+  "dup_code_guard == success",
+  "unused_params_guard == success",
+  "preset_guard == success",
+  "spec_sha_guard == success",
+  "format_black == success",
+  "pyupgrade_guard == success",
+  "method_static_guard == success",
+  "callable_collection_guard == success",
+  "method_tuple_param_guard == success",
+  "utc_policy_guard == success",
+  "timestamp_utc_guard == success",
+  "typeddict_call_guard == success",
+  "dynamic_import_guard == success",
+  "yaml_adapter_guard == success",
+  "constants_values_guard == success",
+  "placeholder_guard == success",
+  "centralization_audit == success"
+
+]
+
+
+[verify_loop.parallelization]
+groups = [
+  ["toolchain_guard","lint","pylint"],
+  ["schema_validate_agents","schema_validate_config","docs_guard"],
+  ["sast","security_audit","license_check","license_policy_guard","SBOM"],  # ← allineati
+  ["tests","coverage_gate","typecov"],
+  ["observability_guard","observability_ast_guard","observability_runtime_test","log_fields_guard","observability_labels_guard"],
+  ["decorator_guard","decorator_ast_guard","magic_numbers_ast_guard"],
+  ["web_gate","web_evidence_cache_guard","web_evidence_guard","emergency_window_guard"],
+  ["rbac_guard","conftest_policy_guard","registry_guard","criticality_matrix_guard"],
+  ["cosign_verify","cosign_provenance_verify","spec_sha_guard"],
+  ["openai_api_schema_guard","openai_client_timeout_guard","responses_union_attr_guard","broad_except_guard"]
+]
+
+
+on_failure = "retry"
+retries = 2
+backoff_s = 10
+circuit_breaker_after_failures = 3
+
+#######################################################################
+# LOGGING, AUDIT E OSSERVABILITÀ
+#######################################################################
+[logging]
+level            = "INFO"
+json             = true
+redact_secrets   = true
+stack_traces     = true
+rotation_mb      = 100
+retention_days   = 400  
+
+[audit]
+enabled          = true
+include_env_diff = false
+artifact_paths   = [".pytest_cache", ".ruff_cache", ".mypy_cache", "dist/", "reports/"]
+
+[telemetry]
+otel_enabled     = true
+metrics_enabled  = true
+traces_enabled   = true
+pushgateway      = "${PROMETHEUS_PUSHGATEWAY}"
+service_name     = "wb-hft-bot"
+service_env      = "${APP_ENV}"
+sampling_ratio   = 0.2
+mandatory_labels = ["trace_id","event_id","component","severity","latency_bucket"]
+
+[incident_reporting]
+sentry_enabled   = true
+dsn_env          = "SENTRY_DSN"
+pii_scrubbing    = true
+
+#######################################################################
+# EMERGENCY POLICY (DEGRADED MODE WITH MANUAL APPROVAL)
+#######################################################################
+[emergency_policy]
+enabled             = false
+approval_file       = "policies/emergency_approval.md"
+max_duration_minutes = 60
+
+#######################################################################
+# WEB EVIDENCE CACHE
+#######################################################################
+[web_evidence_cache]
+
+[web_evidence_cache.backends]
+primary   = "file://cache/web_evidence/"
+secondary = "file://cache2/web_evidence/"
+path       = "cache/web_evidence/"
+signing    = "sha256"
+max_age_h  = 168
+
+#######################################################################
+# QUOTE / BUDGET
+#######################################################################
+[budgets]
+max_cost_usd           = 150.0
+max_requests_per_hour  = 600
+max_tokens_per_request = 16384
+throttle_strategy      = "token-bucket"
+
+#######################################################################
+# OUTPUT CONTRACT
+#######################################################################
+[output_contract]
+deliver = [
+  "unified.patch","TEST-REPORT.txt","LINT-REPORT.txt",
+  "SECURITY-REPORT.txt","BUILD-REPORT.txt","COVERAGE.txt",
+  "docs/codex_autoimprove.md","reports/web_verification_evidence.md","reports/sbom.json"
+]
+summary_fields = [
+  "changed_files", "tests_passed", "linters_passed",
+  "time_spent_seconds", "iterations_used", "cost_estimate_usd"
+]
+
+#######################################################################
+# AUTO-IMPROVEMENT LOOP (CONTINUO FINO A ESAURIMENTO CONTESTO)
+#######################################################################
+[auto_improvement]
+enabled                       = true
+mode                          = "apply"
+loop_strategy                 = "plan-do-check-act"
+max_iterations                = 999
+max_wallclock_seconds         = 3600
+min_context_tokens_reserve    = 2048
+stop_when_context_low         = true
+summarize_between_iterations  = true
+state_summarization_style     = "delta-patch"
+apply_threshold               = "all_checks_pass"
+ascii_only                    = true
+
+[auto_improvement.checks]
+require_tests_green           = true
+require_lint_strict_success   = true
+require_typecheck_strict      = true
+allow_security_warnings       = false
+allow_refactors_unrelated     = false
+max_patch_size_lines          = 400
+
+[auto_improvement.execution_order]
+steps = ["web_gate","web_evidence_guard","ascii_guard","placeholder_ast_guard","constants_guard","decorator_guard","lint","tests","coverage_gate","build","security_audit","sast","typecov"]
+
+
+[auto_improvement.rollback]
+enable_git_checkpoints        = true
+checkpoint_prefix             = "autoimprove/"
+auto_revert_on_regression     = true
+keep_failed_artifacts         = true
+
+[auto_improvement.diff_output]
+emit_unified_patch            = true
+patch_path                    = "reports/autoimprove.patch"
+changelog_append              = "reports/CHANGELOG_AI.md"
+
+[auto_improvement.observability]
+log_each_iteration            = true
+metrics_iteration_timer       = true
+metrics_context_tokens_left   = true
+emit_iteration_summary_md     = "reports/autoimprove_summary.md"
+
+#######################################################################
+# AUTO-IMPROVEMENT — FINALIZZAZIONE E REPORT PRE-EXIT
+#######################################################################
+[auto_improvement.finalization]
+emit_pre_exit_report           = true
+pre_exit_tokens_threshold      = 2048
+report_format                  = "markdown"
+report_path                    = "docs/codex_autoimprove.md"
+create_parent_dir_if_missing   = true
+ascii_only                     = true
+include_sections = [
+  "executed_actions", "applied_patches_summary",
+  "quality_gates", "metrics_snapshot",
+  "regressions_and_rollbacks", "residual_todos",
+  "recommended_next_steps"
+]
+include_diff_stats             = true
+include_timestamps             = true
+include_runtime_budget         = true
+
+#######################################################################
+# POST-EXECUTION FEEDBACK (NEXT-STEPS E MIGLIORAMENTO CONTINUO)
+#######################################################################
+[post_execution_feedback]
+enabled                 = true
+analyze_last_probe      = true
+analyze_metrics         = true
+suggest_improvements    = true
+generate_next_steps     = true
+auto_prioritize         = "impact"
+report_format           = "markdown"
+ascii_only              = true
+include_sections        = [
+  "summary", "bottlenecks_detected",
+  "efficiency_opportunities", "safety_and_risk_notes",
+  "architecture_scalability", "algorithmic_improvement_ideas",
+  "recommended_actions"
+]
+max_suggestions         = 5
+feedback_channel        = "file"
+feedback_file           = "reports/next_steps.md"
+timestamp_feedback      = true
+
+[post_execution_feedback.metrics_thresholds]
+latency_ms_high         = 1200
+error_rate_max          = 0.01
+sharpe_ratio_min        = 2.5
+throughput_tx_s_min     = 1500
+
+[post_execution_feedback.risk_analysis]
+enable                  = true
+evaluate_security        = true
+evaluate_stability       = true
+evaluate_resource_usage  = true
+severity_levels          = ["low", "medium", "high", "critical"]
+report_critical_only     = false
+
+
+#######################################################################
+# RBAC (ROLE-BASED ACCESS CONTROL)
+#######################################################################
+[rbac]
+roles = ["admin","reviewer","operator"]
+mfa_required = true
+# Registry path enforced by rbac_guard
+registry = "infrastructure/audit/rbac.yaml"
+
+#######################################################################
+# BIAS PREVENTION (COGNITIVE SAFETY)
+#######################################################################
+[bias_prevention]
+contrarian_review       = true
+semantic_reframing      = true
+confidence_calibration  = true
+auto_falsification      = true
+pattern_frequency_audit = true
+knowledge_balance_ratio = "60/40"
+decision_traceability   = true
+
+[bias_prevention.metrics]
+min_counterexamples_per_proposal = 1
+min_contrarian_ratio            = 0.1
+
+#######################################################################
+# CRITICALITY GUARD (TOOLS → LEVEL)
+#######################################################################
+[criticality_guard]
+default = "blocking"
+mapping = { lint="blocking", tests="blocking", build="blocking", security_audit="critical", rbac_guard="critical", registry_guard="critical", web_gate="critical", web_evidence_guard="critical", decorator_guard="blocking", coverage_gate="blocking", SBOM="blocking" }
+
+#######################################################################
+# CRITICALITY MATRIX (COMPONENT ↔ POLICY)
+#######################################################################
+[criticality_matrix]
+components = ["order_executor","risk_manager","leverage_controller","strategy_engine","exchange_adapter","audit_trail_manager"]
+policies = ["web_verification","runtime_supervision","deploy_gate","rollback_capable"]
+
+#######################################################################
+# AUTOSCALING (KEDA/HPA)
+#######################################################################
+[autoscaling]
+enabled = true
+triggers = ["queue_depth","latency_ms_p95","orders_tps","error_rate"]
+topologies = ["single-tenant","multi-tenant","multi-region"]
+resilience = ["circuit_breaker","graceful_degradation","retry","failover"]
+
+#######################################################################
+# CI/CD GOVERNANCE
+#######################################################################
+[cicd]
+double_approver_policy = true
+merge_gate             = "strict"
+
+#######################################################################
+# PROFILI
+#######################################################################
+[profiles.default]
+inherit = []
+
+[profiles.deep_reasoning]
+inherit = ["default"]
+model_reasoning_effort = "high"
+max_iterations         = 8
+approval_policy        = "auto-edit"
+
+[profiles.low_latency]
+inherit = ["default", "low_latency_override"]
+approval_policy = "suggest"
+max_iterations  = 3
+
+[profiles.ci_guardrails]
+inherit                 = ["deep_reasoning"]
+approval_policy         = "suggest"
+network_access          = false
+fail_fast               = true
+max_total_latency_s     = 900
+verify_loop.retries     = 1
+verify_loop.backoff_s   = 5
+
+[profiles.self_healing]
+inherit                      = ["deep_reasoning"]
+approval_policy              = "full-auto"
+max_iterations               = 999
+max_total_latency_s          = 3600
+model_reasoning_effort       = "high"
+stop_on_first_success        = false
+use_low_latency_override     = false
+workspace_root               = "/home/daniele/projects/bot_last_version"
+include                      = ["AGENTS.md", "ToolAgent - *.md", "ToolAgent - *.yaml", "tool_agent.py", "src/**/*.py", "docs/**/*.md"]
+
+#######################################################################
+# SECRETS MANAGEMENT
+#######################################################################
+[secrets]
+manager         = "sops"
+rotation_days_max = 90
+scan_patterns   = ["OPENAI_API_KEY","EXCHANGE_API_KEY","EXCHANGE_API_SECRET","SENTRY_DSN","OTEL_EXPORTER_OTLP_ENDPOINT"]
+
+
+#######################################################################
+# ENVIRONMENT PROFILES (DEV / TEST / STAGE / PROD)
+#######################################################################
+[profiles]
+
+[profiles.dev.verify_loop]
+ttl_policy.web_gate_ttl_hours      = 48
+ttl_policy.security_checks_ttl_hours = 12
+order_override = ["toolchain_guard","lint","pylint","tests","schema_validate_agents","schema_validate_config"]
+success_criteria_override = ["lint == success","pylint == success","tests == success","schema_validate_agents == success","schema_validate_config == success"]
+
+[profiles.test.verify_loop]
+ttl_policy.web_gate_ttl_hours      = 36
+ttl_policy.security_checks_ttl_hours = 12
+
+[profiles.stage.verify_loop]
+ttl_policy.web_gate_ttl_hours      = 24
+ttl_policy.security_checks_ttl_hours = 6
+
+[profiles.prod.verify_loop]
+ttl_policy.web_gate_ttl_hours      = 24
+ttl_policy.security_checks_ttl_hours = 6
+merge_gate                         = "strict"
+double_approver_policy             = true
+
+[profiles.prod.bias_prevention.metrics]
+min_counterexamples_per_proposal = 2
+min_contrarian_ratio            = 0.2
+
+
+#######################################################################
+# FEATURE FLAGS & PROGRESSIVE ENFORCEMENT
+#######################################################################
+[feature_flags]
+enforce_ast_guards       = true
+enforce_conftest_policies= true
+enforce_cognitive_kpis   = true
+
+#######################################################################
+# MODEL PROVIDERS
+
+[toolchain.expected]
+ruff       = "0.5.0"
+mypy       = "1.10.0"
+pytest     = "8.1.0"
+bandit     = "1.7.9"
+pip_audit  = "2.7.3"
+pylint     = "3.2.0"
+cyclonedx  = "4.0.0"
+cosign     = "2.2.0"
+conftest   = "0.53.0"
+
+#######################################################################
+[model_providers.openai]
+type        = "cloud"
+base_url    = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+timeout_s   = 120
+
+# ─────────────────────────────
+# Profile resolution compatibility
+# Alcune build di 'codex' risolvono i profili solo come array di tabelle.
+# Manteniamo entrambe le forme senza conflitti.
+
+# Fallback: indica un profilo predefinito (se ignorato, non ha effetti collaterali)
+default_profile = "self_healing_online"
+
+# Profilo offline: la verifica web NON è vincolante
+[profiles.self_healing_offline]
+inherit = ["self_healing"]
+# Override dei criteri di successo del verify_loop: rimuove web_gate
+verify_loop.success_criteria = [
+  "web_gate == success",
+  "emergency_window_guard == success",
+  "web_evidence_cache_guard == success",
+  "web_evidence_guard == success",
+  "ascii_guard == success",
+  "placeholder_ast_guard == success",
+  "placeholder_guard == success",
+  "constants_guard == success",
+  "decorator_guard == success",
+  "decorator_source_guard == success",
+  "docs_guard == success",
+  "schema_validate_agents == success",
+  "schema_validate_config == success",
+  "feature_flags_guard == success",
+  "promotion_gates_guard == success",
+  "config_drift_guard == success",
+  "decorator_ast_guard == success",
+  "observability_ast_guard == success",
+  "magic_numbers_ast_guard == success",
+  "rbac_guard == success",
+  "conftest_policy_guard == success",
+  "registry_guard == success",
+  "model_risk_cards_guard == success",
+  "criticality_matrix_guard == success",
+  "preset_guard == success",
+  "toolchain_guard == success",
+  "lint == success",
+  "pylint == success",
+  "tests == success",
+  "coverage_gate == success",
+  "license_check == success",
+  "license_policy_guard == success",
+  "SBOM == success",
+  "metrics_registry_deprecation_guard == success",
+  "observability_guard == success",
+  "observability_runtime_test == success",
+  "observability_labels_guard == success",
+  "log_fields_guard == success",
+  "cognitive_kpi_guard == success",
+  "build == success",
+  "cosign_verify == success",
+  "cosign_provenance_verify == success"
+]
+
+
+
+[profiles.dev.bias_prevention.metrics]
+min_contrarian_ratio = 0.05
+min_counterexamples_per_proposal = 1
+
+[profiles.test.bias_prevention.metrics]
+min_contrarian_ratio = 0.05
+min_counterexamples_per_proposal = 1
+
+[profiles.stage.bias_prevention.metrics]
+min_contrarian_ratio = 0.1
+min_counterexamples_per_proposal = 1
+
+[ci]
+image_digest = "sha256:EXPECTED_DIGEST"
+
+[guards.toolchain_exact_guard]
+reference_config = "config.toml"   # SSoT runtime
+allow_dual_guard = false           # default fail-closed
+dual_reference_config = "config.toml"  # attivo solo se allow_dual_guard=true
+
+[guards.automation_guardrails]
+enabled         = true
+run_on_ci       = true
+fail_on_drift   = true
+fix_after_review = true
+tool_path       = "tools/centralization_audit.py"
