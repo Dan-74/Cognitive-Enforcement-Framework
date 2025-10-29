@@ -8,7 +8,21 @@ authors:
     orcid: "https://orcid.org/0009-0006-6712-7563"
 version: 1.0.0
 date-released: 2025-10-29
+<<<<<<< HEAD
 repository-code: "https://github.com/Dan-74/Cognitive-Enforcement-Framework"
 license: "CC-BY-NC-ND-4.0"
 url: https://doi.org/10.5281/zenodo.17476141
 doi: 10.5281/zenodo.17476141
+=======
+license: CC-BY-NC-ND-4.0
+repository-code: https://github.com/dan-74/Cognitive-Enforcement-Framework
+url: https://doi.org/10.5281/zenodo.17476141
+doi: 10.5281/zenodo.xxxxxxx
+keywords:
+  - cognitive integrity
+  - auditability
+  - bias prevention
+  - AI governance
+  - CQRS
+  - NIST compliance
+>>>>>>> cce0c9d496d7eed40a6c13e2f481b14de362fcad
