@@ -10,7 +10,7 @@ Executable code remains proprietary.
 
 ## Purpose
 
-*Cognitive Enforcement Framework * is a conceptual and architectural framework designed to:
+*Cognitive Enforcement Framework* is a conceptual and architectural framework designed to:
 
 - Ensure **cognitive and decision integrity** in distributed agent systems;
 - Prevent **semantic and structural bias** in automated decision-making;
