@@ -2,7 +2,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17476141.svg)](https://doi.org/10.5281/zenodo.17476141)
 
 
-**Public release version** of the *ToolAgent* project, developed for cognitive auditing and control of automated systems based on agent-driven toolchains.  
+**Public release version** of the Cognitive Enforcement Framework * project, developed for cognitive auditing and control of automated systems based on agent-driven toolchains.  
 This repository includes only documentation, policies, semantic rules, and reference API specifications.  
 Executable code remains proprietary.
 
@@ -10,7 +10,7 @@ Executable code remains proprietary.
 
 ## Purpose
 
-*ToolAgent* is a conceptual and architectural framework designed to:
+*Cognitive Enforcement Framework * is a conceptual and architectural framework designed to:
 
 - Ensure **cognitive and decision integrity** in distributed agent systems;
 - Prevent **semantic and structural bias** in automated decision-making;
