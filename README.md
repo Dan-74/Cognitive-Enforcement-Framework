@@ -2,7 +2,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17476141.svg)](https://doi.org/10.5281/zenodo.17476141)
 
 
-**Public release version** of the Cognitive Enforcement Framework * project, developed for cognitive auditing and control of automated systems based on agent-driven toolchains.  
+**Public release version** of the *Cognitive Enforcement Framework* project, developed for cognitive auditing and control of automated systems based on agent-driven toolchains.  
 This repository includes only documentation, policies, semantic rules, and reference API specifications.  
 Executable code remains proprietary.
 
