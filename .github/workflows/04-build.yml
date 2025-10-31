@@ -4,25 +4,40 @@ on:
     branches: ["**"]
   pull_request:
     branches: ["**"]
+
 permissions:
   contents: read
   security-events: write
   actions: read
   checks: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
-      build:
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v4
-          - uses: actions/setup-python@v5
-            with: { python-version: "3.12" }
-          - run: pip install -U build
-          - run: python - << 'PY'
-import importlib; import pkgutil
-# Import cold test: ensure no side effects
-print("Import smoke starting")
-PY
-          - run: python -m build
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build backend
+        run: |
+          python -m pip install -U pip
+          pip install -U build
+
+      - name: Import cold test (no side effects)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib, pkgutil
+          print("Import smoke starting")
+          # Esegui qui eventuali import "a freddo" se necessario
+          PY
+
+      - name: Build sdist/wheel
+        run: python -m build
