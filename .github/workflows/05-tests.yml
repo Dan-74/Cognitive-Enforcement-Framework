@@ -1,0 +1,23 @@
+name: 05-tests
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  checks: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e .[dev]
+      - run: pytest -q --maxfail=1 --disable-warnings

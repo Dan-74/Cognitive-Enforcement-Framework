@@ -1,0 +1,32 @@
+name: 02-lint
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  checks: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: pip install -e .[dev]
+      - run: npm ci
+      - run: ruff check .
+      - run: black --check .
+      - run: eslint .
+      - run: markdownlint **/*.md
+      - run: yamllint .
+      - name: actionlint
+        uses: reviewdog/action-actionlint@v1

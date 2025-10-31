@@ -1,0 +1,27 @@
+name: 01-bootstrap
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  checks: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: python -m pip install -U pip && pip install -e .[dev]
+      - run: npm ci
+      - name: SBOM
+        run: pip install syft && syft packages dir:. -o spdx-json > sbom/spdx.json

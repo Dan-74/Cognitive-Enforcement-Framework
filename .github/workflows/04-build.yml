@@ -1,0 +1,28 @@
+name: 04-build
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  checks: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+      build:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - uses: actions/setup-python@v5
+            with: { python-version: "3.12" }
+          - run: pip install -U build
+          - run: python - << 'PY'
+import importlib; import pkgutil
+# Import cold test: ensure no side effects
+print("Import smoke starting")
+PY
+          - run: python -m build

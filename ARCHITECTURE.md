@@ -1,0 +1,1 @@
+# Architettura – sintesi

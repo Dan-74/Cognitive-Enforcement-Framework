@@ -1,0 +1,6 @@
+title = "gitleaks config"
+[[rules]]
+id = "generic-api-key"
+description = "Possibile API Key"
+regex = '''(?i)(api|token|secret)[=:]\s*[A-Za-z0-9_\-]{16,}'''
+tags = ["key","secret"]

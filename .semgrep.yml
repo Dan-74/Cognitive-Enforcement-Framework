@@ -1,0 +1,14 @@
+rules:
+  - id: forbid-eval-exec
+    languages: [python, javascript, typescript]
+    message: "Uso di eval/exec proibito"
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+  - id: tls-verify-off
+    languages: [python]
+    message: "requests.verify=False vietato"
+    severity: ERROR
+    pattern: requests.get(..., verify=False)
